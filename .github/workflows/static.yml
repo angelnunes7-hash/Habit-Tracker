@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --primary: #4F46E5; --bg: #F3F4F6; --card: #FFFFFF; --text: #1F2937; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { background: var(--card); padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 800px; }
+        h1 { text-align: center; color: var(--primary); }
+        .header-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        input[type="date"] { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
+        .tabs { display: flex; gap: 10px; }
+        button { padding: 10px 20px; border: none; background: #e5e7eb; color: var(--text); border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        button.active, button:hover { background: var(--primary); color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .habit-list { display: grid; gap: 15px; }
+        .habit-item { display: flex; align-items: center; justify-content: space-between; padding: 15px; background: #f9fafb; border-radius: 8px; border-left: 4px solid var(--primary); }
+        .habit-item label { font-size: 16px; cursor: pointer; flex-grow: 1; margin-left: 10px; }
+        .habit-item input[type="checkbox"] { width: 24px; height: 24px; cursor: pointer; }
+        .habit-item.completed label { text-decoration: line-through; color: #9CA3AF; }
+        .habit-item.completed { border-left-color: #10B981; }
+        .chart-container { position: relative; height: 300px; width: 100%; margin-bottom: 40px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Mi Tracker de Hábitos</h1>
+    
+    <div class="header-controls">
+        <input type="date" id="datePicker">
+        <div class="tabs">
+            <button id="btnTracker" class="active" onclick="switchTab('tracker')">Tracker Diario</button>
+            <button id="btnStats" onclick="switchTab('stats')">Estadísticas</button>
+        </div>
+    </div>
+
+    <div id="tracker" class="tab-content active">
+        <div class="habit-list" id="habitList"></div>
+    </div>
+
+    <div id="stats" class="tab-content">
+        <h2 style="text-align: center;">Cumplimiento Neto por Día</h2>
+        <div class="chart-container">
+            <canvas id="dailyChart"></canvas>
+        </div>
+        <h2 style="text-align: center;">Cumplimiento Total por Hábito</h2>
+        <div class="chart-container">
+            <canvas id="habitChart"></canvas>
+        </div>
+        <h2 style="text-align: center;">Tasa Global de Éxito</h2>
+        <div class="chart-container" style="height: 250px;">
+            <canvas id="pieChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    const habits = [
+        "WAKE UP EARLY", "SLEEP EARLY", "+7 HRS SLEEP", "EXERCISE FOR >30 MINS", 
+        "NO PH", "STUDY // HOMEWORK", "EAT 3 TIMES", "KEEP ROOM IN ORDER", 
+        "COURSE PROGRESS", "NO UBER", "JOURNALING", "READ", ">1 HOUSECHORE"
+    ];
+
+    const datePicker = document.getElementById('datePicker');
+    const habitList = document.getElementById('habitList');
+    
+    let dailyChartInstance = null;
+    let habitChartInstance = null;
+    let pieChartInstance = null;
+
+    function init() {
+        const today = new Date().toISOString().split('T')[0];
+        datePicker.value = today;
+        datePicker.addEventListener('change', loadHabits);
+        loadHabits();
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tabs button').forEach(el => el.classList.remove('active'));
+        
+        document.getElementById(tabId).classList.add('active');
+        document.getElementById(tabId === 'tracker' ? 'btnTracker' : 'btnStats').classList.add('active');
+
+        if(tabId === 'stats') updateCharts();
+    }
+
+    function getStorageData() {
+        return JSON.parse(localStorage.getItem('habitData')) || {};
+    }
+
+    function saveStorageData(data) {
+        localStorage.setItem('habitData', JSON.stringify(data));
+    }
+
+    function loadHabits() {
+        const date = datePicker.value;
+        const data = getStorageData();
+        const dayData = data[date] || {};
+
+        habitList.innerHTML = '';
+        habits.forEach((habit, index) => {
+            const isChecked = dayData[index] || false;
+            
+            const div = document.createElement('div');
+            div.className = `habit-item ${isChecked ? 'completed' : ''}`;
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `habit-${index}`;
+            checkbox.checked = isChecked;
+            checkbox.onchange = (e) => toggleHabit(index, e.target.checked);
+
+            const label = document.createElement('label');
+            label.htmlFor = `habit-${index}`;
+            label.innerText = habit;
+
+            div.appendChild(checkbox);
+            div.appendChild(label);
+            habitList.appendChild(div);
+        });
+    }
+
+    function toggleHabit(index, isChecked) {
+        const date = datePicker.value;
+        const data = getStorageData();
+        
+        if (!data[date]) data[date] = {};
+        data[date][index] = isChecked;
+        
+        saveStorageData(data);
+        loadHabits(); 
+    }
+
+    function updateCharts() {
+        const data = getStorageData();
+        const dates = Object.keys(data).sort();
+        
+        const dailyScores = dates.map(date => {
+            const dayData = data[date];
+            const completedCount = Object.values(dayData).filter(Boolean).length;
+            return (completedCount / habits.length) * 100;
+        });
+
+        const habitTotals = new Array(habits.length).fill(0);
+        let totalPossible = dates.length * habits.length;
+        let totalCompleted = 0;
+
+        dates.forEach(date => {
+            const dayData = data[date];
+            habits.forEach((_, index) => {
+                if (dayData[index]) {
+                    habitTotals[index]++;
+                    totalCompleted++;
+                }
+            });
+        });
+
+        renderDailyChart(dates, dailyScores);
+        renderHabitChart(habitTotals);
+        renderPieChart(totalCompleted, totalPossible);
+    }
+
+    function renderDailyChart(labels, dataPoints) {
+        const ctx = document.getElementById('dailyChart').getContext('2d');
+        if (dailyChartInstance) dailyChartInstance.destroy();
+        dailyChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{ label: '% de Cumplimiento Diario', data: dataPoints, borderColor: '#4F46E5', backgroundColor: 'rgba(79, 70, 229, 0.1)', fill: true, tension: 0.3 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100 } } }
+        });
+    }
+
+    function renderHabitChart(dataPoints) {
+        const ctx = document.getElementById('habitChart').getContext('2d');
+        if (habitChartInstance) habitChartInstance.destroy();
+        habitChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: habits,
+                datasets: [{ label: 'Días Completados', data: dataPoints, backgroundColor: '#10B981' }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    function renderPieChart(completed, possible) {
+        const ctx = document.getElementById('pieChart').getContext('2d');
+        if (pieChartInstance) pieChartInstance.destroy();
+        const missed = possible > 0 ? possible - completed : 1; 
+        
+        pieChartInstance = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Hábitos Logrados', 'Hábitos Fallados'],
+                datasets: [{ data: [completed, missed], backgroundColor: ['#10B981', '#EF4444'] }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    init();
+</script>
+</body>
+</html>
